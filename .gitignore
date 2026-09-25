@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Ferramentas
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Dados locais do PyMail Client — NUNCA versionar.
+# Contêm correio do usuário: banco, WAL, logs, rascunhos e anexos.
+*.db
+*.db-wal
+*.db-shm
+outbox-recuperado-*.json
+config.toml
+logs/
+attachments/
+
+# Especificação de empacotamento
+packaging/*.spec.bak
