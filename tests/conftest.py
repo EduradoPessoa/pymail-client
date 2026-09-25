@@ -9,3 +9,6 @@ from __future__ import annotations
 
 # As fixtures compartilhadas (servidor IMAP falso, cofre de credenciais, banco)
 # entram aqui a partir de T-02; este arquivo é o ponto único de contrato.
+# O cofre falso substitui o keyring do SO em todo teste que fala de credencial.
+# Importado aqui para que a fixture seja descoberta por qualquer módulo de teste.
+from tests.fakes.fake_keyring import fake_keyring  # noqa: F401
