@@ -7,6 +7,9 @@ visíveis num único lugar.
 
 from __future__ import annotations
 
+import email
+from pathlib import Path
+
 import pytest
 
 from tests.fakes.fake_keyring import fake_keyring  # noqa: F401
@@ -58,3 +61,34 @@ def plain_server():
     server = _make_plain_server()
     yield server
     server.shutdown_server()
+
+
+@pytest.fixture
+def load_eml():
+    """Load HTML content from malicious EML fixtures.
+
+    Usage:
+        def test_something(load_eml):
+            html = load_eml("script_inline").html
+            # test with html
+    """
+    fixtures_dir = Path(__file__).parent / "fixtures" / "eml" / "malicious"
+
+    class EMLContent:
+        def __init__(self, html: str):
+            self.html = html
+
+    def _load(name: str) -> EMLContent:
+        path = fixtures_dir / f"{name}.eml"
+        raw = path.read_bytes()
+        msg = email.message_from_bytes(raw)
+        # Get the HTML part
+        for part in msg.walk():
+            if part.get_content_type() == "text/html":
+                payload = part.get_payload(decode=True)
+                if payload:
+                    return EMLContent(payload.decode("utf-8", errors="replace"))
+        # Fallback: if no HTML part, return empty
+        return EMLContent("")
+
+    return _load

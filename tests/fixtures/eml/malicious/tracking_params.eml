@@ -1,0 +1,18 @@
+From: marketer@example.com
+To: victim@example.com
+Subject: Test tracking params
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+
+Plain text version
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Click <a href="https://example.com/page?utm_source=newsletter&utm_medium=email&utm_campaign=summer&fbclid=123&gclid=456">here</a></p></body></html>
+
+--boundary123--

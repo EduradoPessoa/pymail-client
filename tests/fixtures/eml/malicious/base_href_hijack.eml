@@ -1,0 +1,18 @@
+From: attacker@example.com
+To: victim@example.com
+Subject: Test base href hijack
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+
+Plain text version
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+
+<html><head><base href="https://evil.example.com/"></head><body><img src="image.png"><a href="link.html">Link</a></body></html>
+
+--boundary123--

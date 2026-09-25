@@ -278,3 +278,46 @@ def delete_credential(account: str | Any, *, oauth: bool = False) -> None:
 keyring_get_credential = get_credential
 keyring_set_credential = set_credential
 keyring_delete_credential = delete_credential
+
+
+# ─────────────────────── Sanitização de HTML (§4 de 05) ───────────────────────
+# O pipeline vive em `core/sanitizer.py` porque este módulo passou do limiar de
+# ~300 linhas que `02-arquitetura.md` §2.1 fixa para a separação. A separação é
+# deliberada: gestão de credenciais é I/O contra o sistema operacional, e
+# sanitização é função pura `str -> str` — as duas coisas que mais precisam de
+# teste neste projeto, e testá-las no mesmo módulo tornaria o teste pior.
+#
+# A transferência é invisível para os chamadores: o import continua sendo
+# `from pymail_client.core.security import sanitize_html`.
+
+from pymail_client.core.sanitizer import (  # noqa: E402
+    CSP_NO_IMAGES,
+    CSP_WITH_IMAGES,
+    SANITIZER_VERSION,
+    SanitizeContext,
+    SanitizeReport,
+    html_to_text_plain,
+    restore_remote_resources,
+    sanitize_html,
+    sanitize_html_with_report,
+)
+
+__all__ = [
+    "CSP_NO_IMAGES",
+    "CSP_WITH_IMAGES",
+    "KEYRING_SERVICE",
+    "SANITIZER_VERSION",
+    "SanitizeContext",
+    "SanitizeReport",
+    "delete_credential",
+    "get_credential",
+    "html_to_text_plain",
+    "keyring_delete_credential",
+    "keyring_get_credential",
+    "keyring_is_available",
+    "keyring_set_credential",
+    "restore_remote_resources",
+    "sanitize_html",
+    "sanitize_html_with_report",
+    "set_credential",
+]

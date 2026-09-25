@@ -1,0 +1,18 @@
+From: attacker@example.com
+To: victim@example.com
+Subject: Test onerror img
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+
+Plain text version
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+
+<html><body><img src="x" onerror="alert('xss')" alt="test"></body></html>
+
+--boundary123--

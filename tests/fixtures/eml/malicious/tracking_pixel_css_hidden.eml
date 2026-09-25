@@ -1,0 +1,18 @@
+From: tracker@example.com
+To: victim@example.com
+Subject: Test tracking pixel css hidden
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+
+Plain text version
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Hello</p><img src="https://tracker.example.com/pixel.png" style="display:none" width="10" height="10" alt=""><p>World</p></body></html>
+
+--boundary123--

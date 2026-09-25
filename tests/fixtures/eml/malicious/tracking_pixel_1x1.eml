@@ -1,0 +1,18 @@
+From: tracker@example.com
+To: victim@example.com
+Subject: Test tracking pixel 1x1
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+
+Plain text version
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Hello</p><img src="https://tracker.example.com/pixel.gif" width="1" height="1" alt=""><p>World</p></body></html>
+
+--boundary123--

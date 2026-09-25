@@ -1,0 +1,39 @@
+From: sender@example.com
+To: victim@example.com
+Subject: Test remote images 20
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+
+Plain text version
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>Image 1</p><img src="https://example.com/img1.jpg" alt="1">
+<p>Image 2</p><img src="https://example.com/img2.jpg" alt="2">
+<p>Image 3</p><img src="https://example.com/img3.jpg" alt="3">
+<p>Image 4</p><img src="https://example.com/img4.jpg" alt="4">
+<p>Image 5</p><img src="https://example.com/img5.jpg" alt="5">
+<p>Image 6</p><img src="https://example.com/img6.jpg" alt="6">
+<p>Image 7</p><img src="https://example.com/img7.jpg" alt="7">
+<p>Image 8</p><img src="https://example.com/img8.jpg" alt="8">
+<p>Image 9</p><img src="https://example.com/img9.jpg" alt="9">
+<p>Image 10</p><img src="https://example.com/img10.jpg" alt="10">
+<p>Image 11</p><img src="https://example.com/img11.jpg" alt="11">
+<p>Image 12</p><img src="https://example.com/img12.jpg" alt="12">
+<p>Image 13</p><img src="https://example.com/img13.jpg" alt="13">
+<p>Image 14</p><img src="https://example.com/img14.jpg" alt="14">
+<p>Image 15</p><img src="https://example.com/img15.jpg" alt="15">
+<p>Image 16</p><img src="https://example.com/img16.jpg" alt="16">
+<p>Image 17</p><img src="https://example.com/img17.jpg" alt="17">
+<p>Image 18</p><img src="https://example.com/img18.jpg" alt="18">
+<p>Image 19</p><img src="https://example.com/img19.jpg" alt="19">
+<p>Image 20</p><img src="https://example.com/img20.jpg" alt="20">
+</body></html>
+
+--boundary123--
