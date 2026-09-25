@@ -155,6 +155,7 @@ git commit -m "feat(config): project skeleton, AppConfig with validated defaults
 - Criar: `pymail_client/core/models.py`
 - Criar: `pymail_client/core/storage.py`
 - Criar: `tests/test_storage_migrations.py`
+- Criar: `scripts/make_golden_db.py`, `tests/fixtures/db/v1_golden.db` (banco de referência da versão 1, **versionado em git**, usado para provar que uma migração preserva dados reais e não apenas um banco recém-criado — ver `06-estrategia-de-testes.md`)
 - Requisitos: RF-SET-03, RF-ACC-02, RNF-SEC-05 · CA-RF-SET-03-1
 
 **Passo 1 — escrever o teste que falha**

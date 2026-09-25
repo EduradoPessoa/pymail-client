@@ -24,5 +24,12 @@ config.toml
 logs/
 attachments/
 
+# EXCEÇÃO deliberada: o banco de referência da versão 1 do schema PRECISA ser
+# versionado (ver 06-estrategia-de-testes.md). Sem esta negação, a regra `*.db`
+# acima o excluiria em silêncio, e os testes de migração passariam a rodar
+# apenas contra bancos recém-criados — deixando de provar o que existem para
+# provar: que uma migração preserva dados reais de um banco antigo.
+!tests/fixtures/db/*.db
+
 # Especificação de empacotamento
 packaging/*.spec.bak

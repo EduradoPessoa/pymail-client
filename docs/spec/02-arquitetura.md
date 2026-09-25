@@ -156,6 +156,16 @@ São as duas coisas que mais precisam de teste no projeto (é a proposta de valo
 1. **São dois passes de `nh3`, com um passo de reescrita entre eles**, de modo que a autoridade estrutural seja sempre a **última** transformação. Um passe único que reescrevesse atributos depois da allowlist permitiria à reescrita reintroduzir algo que o `nh3` já havia removido.
 2. **O espaço de nomes `data-pymail-*` é descartado no primeiro passe e recriado apenas pelo passo de reescrita.** Sem isso, um remetente malicioso poderia embutir `data-pymail-src` no próprio HTML e **forjar o marcador** que o leitor usa para restaurar imagens quando o usuário autoriza — transformando o mecanismo de consentimento em vetor de carregamento de conteúdo remoto. É por isso que o atributo não pode ser simplesmente "permitido" na allowlist, e é o achado de segurança mais relevante desta fase.
 
+**Os três nomes de atributo são canônicos e exaustivos.** Nenhum outro documento nem o código podem criar variantes — foi exatamente essa liberdade, concedida a três documentos escritos em paralelo, que produziu a divergência corrigida na reconciliação:
+
+| Atributo | Papel |
+|---|---|
+| `data-pymail-src` | URL remota original de imagem, `background` ou `srcset`, retirada do atributo vivo |
+| `data-pymail-cid` | Referência de conteúdo inline (`cid:`), reservado para fase futura |
+| `data-pymail-blocked="1"` | Marcador de recurso bloqueado por política |
+
+São **proibidos**: `data-original-src`, `data-original-href` e `data-pymail-href`. Em `<a href>`, os parâmetros de rastreamento são removidos no próprio lugar, sem preservar o href original em atributo algum — restaurá-lo não teria finalidade e criaria mais um marcador a ser validado.
+
 A ordem normativa das etapas é a de `05` §4, que inclui o passo intermediário de reescrita entre os dois passes do `nh3`. A tarefa `T-05` deve implementá-la nessa ordem, e `CA-RF-RD-01-1` é o teste que a protege.
 
 ---
@@ -406,7 +416,17 @@ Todos os métodos são seguros entre threads conforme ADR-006. Nomes e assinatur
 
 ```python
 class Storage:
-    def __init__(self, db_path: Path) -> None: ...
+    def __init__(self, db_path: Path, *,
+                 connection_hook: Callable[[sqlite3.Connection], None] | None = None) -> None:
+        """connection_hook é API EXCLUSIVA DE TESTE (C7).
+
+        Recebe cada conexão recém-aberta, antes dos PRAGMAs de §2. Existe para
+        que os testes de atomicidade corpo+índice (CA-RF-SRCH-04-1) instalem
+        sqlite3.Connection.set_authorizer e forcem falha no ponto exato.
+        Sem este ponto de injeção, o teste dependeria de monkeypatch em função
+        interna, que quebra a cada refatoração. Em produção é sempre None.
+        """
+        ...
 
     # Migrações e ciclo de vida
     def migrate(self) -> int: ...                     # devolve a versão aplicada
@@ -501,6 +521,34 @@ view.setHtml(sanitized_html, QUrl("pymail://message/"))
 
 ---
 
+### 5.6 Relógio injetável — `core/clock.py`
+
+Tempo é uma dependência externa como qualquer outra, e três comportamentos deste projeto dependem dele: a janela do Undo Send (5 a 30 s, `RF-SND-03`), o atraso para marcar como lida (1.500 ms, `RF-RD-09`) e a recuperação da fila de envio na inicialização, com carência de 24 h (`CA-RF-SND-04-1`). Testar isso com `time.sleep()` deixaria a suíte lenta, instável e **incapaz de exercitar a carência de 24 horas**.
+
+```python
+class Clock(Protocol):
+    def now(self) -> float: ...        # epoch UTC — persistência e comparação com outbox.send_at
+    def monotonic(self) -> float: ...  # intervalos — nunca time.time()
+
+class SystemClock:
+    """Implementação real. A única que consulta o relógio do sistema."""
+
+class FakeClock:
+    """Testes: avanço manual e determinístico."""
+    def advance(self, *, seconds: float) -> None: ...
+```
+
+**Regras normativas:**
+
+- `OutboxScheduler`, o atraso de "marcar como lida" e a recuperação na inicialização **recebem** um `Clock` por injeção. Nenhum deles chama `time.time()` diretamente.
+- Nenhum teste avança tempo com `sleep`. O único uso legítimo é a sonda que mede bloqueio real da thread da GUI em `T-39`.
+- `now()` é para persistência; `monotonic()` é para medir intervalos. Usar `time.time()` para medir intervalo é defeito: um ajuste de NTP pode fazer o relógio recuar e produzir um valor negativo ou distorcido.
+- O `FakeClock` é injetado pela mesma via do `AuthProvider` falso de `CA-RF-ACC-04-1` — é isso que permite testar a carência de 24 h sem esperar 24 horas.
+
+Isto resolve a lacuna L-08 apontada em `06-estrategia-de-testes.md` §12.
+
+---
+
 ## 6. Fluxos principais
 
 ### 6.1 Sincronização inicial de uma conta
@@ -589,7 +637,7 @@ Regras de comportamento:
 | `sqlite3` (stdlib) | Armazenamento e FTS5 | F1 | prompt |
 | `imaplib`, `smtplib`, `poplib` (stdlib) | Protocolos | F1 / F2 | prompt, ADR-001 |
 | `platformdirs` | Diretórios de dados por SO | F1 | **acréscimo menor** (alternativa: `QStandardPaths`, já disponível) |
-| `pytest`, `pytest-qt`, `pytest-cov`, `ruff` | Teste e qualidade | F1 | dev |
+| `pytest`, `pytest-qt`, `pytest-cov`, `pytest-timeout`, `pytest-xdist`, `ruff`, `mypy` | Teste, qualidade e tipagem | F1 | dev |
 | `aiosmtplib`, `aioimaplib` | — | — | **não usados** (ADR-001) |
 | `poplib` | POP3 | F2 | prompt |
 
