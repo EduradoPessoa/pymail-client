@@ -66,7 +66,9 @@
 | `ruff` (`format` + `check`) | Formatação e análise estática | RNF-MAINT-02 |
 | `mypy` | Tipagem estática | `core/` em modo estrito; `ui/` em modo normal |
 
-**Não entram** dependências de relógio falso (`freezegun`) nem de mock de socket: o relógio é injetado por interface própria (`Clock`) e o socket é substituído por servidor falso real, o que é mais fiel e não adiciona dependência.
+**Não entram** dependências de relógio falso (`freezegun`): o relógio é injetado por interface própria — `Clock`, agora formalmente definida em `02-arquitetura.md` §5.6. Servidores falsos em socket continuam sendo a estratégia para exercitar os protocolos, por serem mais fiéis que dublês de objeto.
+
+**Contradição corrigida com `05-seguranca-privacidade.md` §11.3.** A redação anterior desta seção afirmava que não haveria "mock de socket". Isso conflitava com a exigência da spec de segurança de uma **segunda camada de instrumentação**, na qual a camada de socket é substituída para provar que nenhuma conexão escapa do processo. As duas coisas são compatíveis e **ambas são obrigatórias**: servidores falsos exercitam os protocolos; a guarda de socket (§4.7) apenas observa e bloqueia destinos não autorizados. São instrumentos distintos, com finalidades distintas, e tratá-los como a mesma coisa foi o erro da redação anterior.
 
 ### 2.2 `pyproject.toml` — seções de teste, cobertura e qualidade
 
@@ -950,9 +952,25 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class Attempt:
+    """Uma tentativa de requisição, registrada por QUALQUER uma das duas camadas (§4.7).
+
+    decision/reason/origin são obrigatórios: sem eles é impossível distinguir
+    "nunca tentou" de "tentou e foi bloqueado" — que é exatamente a diferença
+    que CA-RNF-PRIV-01-1 mede.
+
+    `allowed` permanece como propriedade derivada, para não invalidar as
+    asserções já escritas neste documento.
+    """
     url: str
-    resource_type: str
-    allowed: bool
+    resource_type: str   # image | stylesheet | script | font | xhr | media | other
+    decision: str        # allowed | blocked
+    reason: str          # authorized_image | not_authorized | resource_type_blocked
+                         # | sanitized_no_remote | socket_layer_blocked | non_allowlisted_host
+    origin: str          # interceptor | socket
+
+    @property
+    def allowed(self) -> bool:
+        return self.decision == "allowed"
 
 
 class RequestRecorder:
@@ -966,16 +984,30 @@ class RequestRecorder:
         self._lock = threading.Lock()
         self._attempts: list[Attempt] = []
 
-    def record(self, url: str, resource_type: str, *, allowed: bool) -> None:
+    def record(self, attempt: Attempt) -> None:
         with self._lock:
-            self._attempts.append(Attempt(url, resource_type, allowed))
+            self._attempts.append(attempt)
 
-    # Compatibilidade com a assinatura de 02-arquitetura.md §5.5
-    def record_blocked(self, url: str, resource_type: str = "unknown") -> None:
-        self.record(url, resource_type, allowed=False)
+    # Atalhos usados pelo PrivacyInterceptor (02-arquitetura.md §5.5)
+    def record_blocked(self, url: str, resource_type: str = "other",
+                       reason: str = "not_authorized", origin: str = "interceptor") -> None:
+        self.record(Attempt(url, resource_type, "blocked", reason, origin))
 
-    def record_allowed(self, url: str, resource_type: str = "image") -> None:
-        self.record(url, resource_type, allowed=True)
+    def record_allowed(self, url: str, resource_type: str = "image",
+                       reason: str = "authorized_image", origin: str = "interceptor") -> None:
+        self.record(Attempt(url, resource_type, "allowed", reason, origin))
+
+    def count(self, *, decision: str | None = None, reason: str | None = None,
+              origin: str | None = None, url_contains: str | None = None) -> int:
+        """Assinatura canônica, usada por 05-seguranca-privacidade.md §7.5 e §13."""
+        with self._lock:
+            return sum(
+                1 for a in self._attempts
+                if (decision is None or a.decision == decision)
+                and (reason is None or a.reason == reason)
+                and (origin is None or a.origin == origin)
+                and (url_contains is None or url_contains in a.url)
+            )
 
     @property
     def attempts(self) -> list[Attempt]:
@@ -1027,6 +1059,87 @@ class RequestRecorder:
 | `QWebEngineUrlRequestInterceptor` | A decisão de bloquear | "O bloqueio de privacidade funciona porque o teste afirma que o método foi chamado" — e a requisição sai pela rede de verdade |
 
 **Consequência prática:** o dublê fica na fronteira de rede (servidor falso TCP) ou de sistema operacional (keyring), e a asserção é sempre sobre **o que o servidor falso observou** ou sobre **o conteúdo do banco**, nunca sobre a lista de chamadas de um mock do nosso próprio módulo.
+
+---
+
+### 4.7 Guarda de socket — a segunda camada de instrumentação
+
+**Por que existe e por que é obrigatória.** A camada 1 (`PrivacyInterceptor`) só enxerga o que o motor de renderização tenta buscar. A camada 2 enxerga o **processo inteiro**: qualquer socket aberto por qualquer código Python — biblioteca padrão, dependência de terceiros ou defeito nosso. Exigida por `05-seguranca-privacidade.md` §11.3, ela fecha a lacuna que faria `CA-RNF-PRIV-01-1` afirmar mais do que efetivamente prova.
+
+```python
+# tests/support/net_guard.py
+"""Bloqueio e registro de toda conexão de saída do processo.
+
+Destinos permitidos são apenas os servidores falsos criados pela própria sessão
+de teste, em localhost — preenchidos pela fixture do conftest.
+"""
+
+
+class ExternalConnectionAttempted(AssertionError):
+    """Erro de teste, não de produção: algo tentou sair do processo."""
+
+
+class SocketGuard:
+    def __init__(self, recorder: RequestRecorder, allowed: set[tuple[str, int]]) -> None:
+        self._recorder = recorder
+        self._allowed = allowed
+
+    def __enter__(self) -> "SocketGuard":
+        import socket
+        import ssl
+
+        self._connect = socket.socket.connect
+        self._getaddrinfo = socket.getaddrinfo
+        self._wrap_socket = ssl.SSLContext.wrap_socket
+
+        def guarded_connect(sock, address):
+            host, port = address[0], address[1]
+            if (host, port) not in self._allowed:
+                self._recorder.record(Attempt(
+                    url=f"{host}:{port}", resource_type="other", decision="blocked",
+                    reason="non_allowlisted_host", origin="socket"))
+                raise ExternalConnectionAttempted(f"conexão externa bloqueada: {host}:{port}")
+            return self._connect(sock, address)
+
+        socket.socket.connect = guarded_connect
+        ssl.SSLContext.wrap_socket = self._guarded_wrap_socket
+        return self
+
+    def __exit__(self, *exc) -> None:
+        import socket
+        import ssl
+        socket.socket.connect = self._connect
+        ssl.SSLContext.wrap_socket = self._wrap_socket
+```
+
+#### 4.7.1 Controle positivo — obrigatório, não opcional
+
+Uma fixture de bloqueio que não bloqueia produz um "zero requisições" **falso**, e um falso negativo aqui é pior do que nenhum teste: dá confiança sem prova. Todo teste que use a guarda precisa provar que ela dispara.
+
+```python
+def test_socket_guard_actually_fires(socket_guard):
+    """CONTROLE POSITIVO. Sem ele, os testes de privacidade não provam nada.
+
+    198.51.100.7 é TEST-NET-2 (RFC 5737): faixa reservada para documentação,
+    nunca roteável. Serve para induzir a tentativa com segurança mesmo no caso
+    patológico em que a guarda, por defeito, deixe a conexão passar.
+    """
+    import socket
+
+    with pytest.raises(ExternalConnectionAttempted):
+        socket.create_connection(("198.51.100.7", 80), timeout=1)
+
+    assert socket_guard.count(origin="socket", reason="non_allowlisted_host") == 1
+```
+
+#### 4.7.2 A asserção de `CA-RNF-PRIV-01-1` é obrigatoriamente dupla
+
+```python
+assert recorder.count(decision="allowed", origin="interceptor") == 0   # camada 1
+assert recorder.count(origin="socket") == 0                            # camada 2
+```
+
+Uma asserção sem a outra é uma prova pela metade. As duas juntas são o que autoriza o produto a afirmar "nenhuma requisição de rede originada pelo conteúdo de um e-mail".
 
 ---
 
@@ -1435,7 +1548,7 @@ def test_sanitized_output_has_no_active_remote_references(corpus_message):
     assert REMOTE_REF.search(html) is None, f"referência remota ativa em {corpus_message.name}"
     # ... e a URL original foi preservada para a interface (data-*), provando que
     # não estamos apenas apagando tudo.
-    assert "data-original-src" in html or "data-original-href" in html
+    assert "data-pymail-src" in html or "data-pymail-cid" in html
 ```
 
 #### 5.2.3 Nível B — o teste do critério de aceite, com `QWebEngineView` real
@@ -1514,7 +1627,7 @@ def test_rendering_corpus_produces_zero_network_requests(
 |---|---|
 | O requisito é sobre rede, não sobre marcação | `RNF-PRIV-01` diz "nenhuma requisição de rede é originada pelo conteúdo". Inspecionar o HTML é uma proxy; a tentativa registrada pelo interceptor é o fato |
 | Vetores que não são tags | `background-image: url(...)` em atributo `style`, `@import` e `@font-face` dentro de `<style>`, `<meta http-equiv="refresh">`, `<link rel="preload">`, `<video poster>`, `<track src>`, `<form action>`, `<picture>/<srcset>`. Uma varredura de tags `<img>` deixa todos passarem |
-| O nosso próprio passe reescreve URLs | `data-original-src` preserva a URL (exigido por RF-RD-05/RF-RD-07). Uma varredura ingênua por `http` no HTML sanitizado produziria **falso positivo** — e alguém "resolveria" removendo a preservação, quebrando um requisito |
+| O nosso próprio passe reescreve URLs | `data-pymail-src` preserva a URL (exigido por RF-RD-05/RF-RD-07). Uma varredura ingênua por `http` no HTML sanitizado produziria **falso positivo** — e alguém "resolveria" removendo a preservação, quebrando um requisito. **Os nomes canônicos são `data-pymail-src`, `data-pymail-cid` e `data-pymail-blocked`** (`02-arquitetura.md`, ADR-004); variantes `data-original-*` são proibidas |
 | O motor pede coisas que o HTML não pediu | favicon, pré-carregamento especulativo, redirecionamentos, `data:` URIs, arquivos de fonte. Só o interceptor vê o que realmente sai |
 | O interceptor vê também o que foi **cancelado** | `info.block(True)` não apaga o registro da tentativa. Bloquear no último instante é diferente de nunca tentar, e essa diferença é informação de segurança |
 | Defesa em profundidade | Sanitização e interceptor são camadas distintas (ADR-003/ADR-004). O teste mede a camada que o produto promete: a de rede |
@@ -1820,11 +1933,11 @@ Sanitização é a única função do projeto que é pura, determinística e alv
 | `test_sanitize_strips_css_expression_and_behavior` | `expression()`, `behavior:` e `-moz-binding` são removidos do `style` (passe `tinycss2`) | CA-RF-RD-01-1 |
 | `test_sanitize_removes_remote_css_import` | `@import url(http://...)` e `url(http://...)` em `style`/`<style>` não sobrevivem | CA-RF-RD-01-1 |
 | `test_sanitize_blocks_all_remote_resources` | Todo recurso remoto é neutralizado ou reescrito | CA-RF-RD-03-1, CA-RNF-PRIV-01-1 |
-| `test_sanitize_preserves_original_url_in_data_attr` | A URL original sobrevive em `data-original-src`/`data-original-href` | RF-RD-05, 03 §6.3 |
+| `test_sanitize_preserves_original_url_in_data_attr` | A URL original sobrevive em `data-pymail-src` (nome canônico de `02-arquitetura.md`, ADR-004); **nenhuma** variante `data-original-*` é aceita | RF-RD-05, 03 §6.3 |
 | `test_sanitize_removes_tracking_pixels_irreversibly[pixel_1x1, pixel_0x0, display_none, visibility_hidden, hidden_attr, width_attr]` | O pixel é removido **mesmo** com `allow_remote_images=True` | CA-RF-RD-04-1, RNF-PRIV-03 |
 | `test_sanitize_keeps_legitimate_inline_image_as_data_uri` | Imagem embutida legítima não é destruída junto com os rastreadores | RF-RD-03 |
 | `test_sanitize_strips_tracking_query_params[utm_source,utm_medium,fbclid,gclid,mc_eid,_hsenc,_hsmi,vero_id,igshid]` | Parâmetro de rastreamento removido do `href`, preservando os demais | RF-RD-05 |
-| `test_sanitize_preserves_anchor_text_of_misleading_link` | O texto exibido (`banco-falso.com`) não é alterado, e o `data-original-href` guarda o destino real | CA-RF-RD-07-1 |
+| `test_sanitize_preserves_anchor_text_of_misleading_link` | O texto exibido (`banco-falso.com`) não é alterado. O `href` final aponta para o host **real** (`exemplo.com`), que é o que a confirmação de `CA-RF-RD-07-1` mostra ao usuário. **Não existe** atributo que preserve o href original: os parâmetros de rastreamento são removidos no próprio lugar | CA-RF-RD-07-1 |
 | `test_sanitize_injects_csp_meta` | `<meta http-equiv="Content-Security-Policy">` presente e restritivo no HTML final | RF-RD-06 (defesa em profundidade) |
 | `test_sanitize_is_idempotent` | `sanitize_html(sanitize_html(x)) == sanitize_html(x)` — permite re-sanitizar sem degradar | 03 §6.3 (re-sanitização por `sanitizer_version`) |
 | `test_sanitize_handles_missing_or_malformed_headers` | Cabeçalhos ausentes/malformados não geram exceção nem HTML vazio | fixtures `malformed/` |
